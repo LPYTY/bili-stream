@@ -1,0 +1,13 @@
+config.json
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.exe
+*.spec
+*.zip
+*.tar.gz
+*.egg-info/
+*.log
