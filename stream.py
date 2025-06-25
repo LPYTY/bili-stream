@@ -1,11 +1,14 @@
-import requests
+import httpx
 import time
 import json
 import argparse
 
 # disable warnings
+import urllib
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+import blivedll
 
 class BiliLive:
     def __init__(self):
@@ -13,9 +16,12 @@ class BiliLive:
         self.start_live_url = self.base_url + "/room/v1/Room/startLive"
         self.end_live_url = self.base_url + "/room/v1/Room/stopLive"
         self.get_area_url = self.base_url + "/room/v1/Area/getList?show_pinyin=1"
-        self.session = requests.Session()
-        self.session.headers.update(self.create_headers())
+        self.session = httpx.Client(http2=True, verify=False, headers=self.create_headers())
         self.is_living = False
+        self.blive_path = None
+        self.blive_version = None
+        self.blive_build = None
+        self.sign_fn = None
         self.room_id = None
         self.cookies = None
         self.area = None
@@ -31,6 +37,13 @@ class BiliLive:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive'
         }
+    
+    def set_blive_path(self, blive_path):
+        self.blive_path = blive_path
+        dll_info = blivedll.get_dll_info(blive_path)
+        self.blive_version = dll_info['version']
+        self.blive_build = dll_info['build']
+        self.sign_fn = dll_info['sign']
     
     def set_cookies(self, cookies):
         self.cookies = {}
@@ -48,21 +61,28 @@ class BiliLive:
 
     def start_live(self):
         if self.is_living:
-            print("直播已经开始，请先结束直播")
-            return
+            print("已有正在进行中的直播")
+            #return
         if not self.room_id or not self.area:
             print("请设置直播间号和分区")
             return
         try:
             payload = {
+                "access_key": "",
+                "appkey": "aae92bc66f3edfab",
                 "area_v2": self.area,
+                "build": self.blive_build,
                 'room_id': self.room_id,
-                'csrf_token': self.cookies.get('bili_jct'),
-                'csrf': self.cookies.get('bili_jct'),
-                'platform': 'web_link',
-                'visit_id': ''
+                'platform': 'pc_link',
+                'ts': int(time.time()),
+                'type': 1,
+                'version': self.blive_version
             }
-            response = self.session.post(self.start_live_url, data=payload, verify=False)
+            signature = self.sign_fn(urllib.parse.urlencode(payload))
+            payload['sign'] = signature
+            payload['csrf_token'] = self.cookies.get('bili_jct', '')
+            payload['csrf'] = self.cookies.get('bili_jct', '')
+            response = self.session.post(self.start_live_url, data=payload)
             response_data = response.json()
             if response_data['code'] == 0:
                 self.is_living = True
@@ -76,21 +96,30 @@ class BiliLive:
                 print(f"直播未能开始: {response_data['message']}")
         except Exception as e:
             print(f"出错了: {e}")
+            print(response.headers)
+            print(response.content)
+            #raise e
             self.is_living = False
 
     def end_live(self):
         if not self.is_living:
             print("没有正在进行的直播")
-            return
+            #return
         try:
             payload = {
-                'csrf_token': self.cookies.get('bili_jct'),
-                'csrf': self.cookies.get('bili_jct'),
-                'platform': 'web_link',
+                'access_key': '',
+                'appkey': 'aae92bc66f3edfab',
+                'build': self.blive_build,
+                'platform': 'pc_link',
                 'room_id': self.room_id,
-                'visit_id': ''
+                'ts': int(time.time()),
+                'version': self.blive_version,
             }
-            response = self.session.post(self.end_live_url, data=payload, verify=False)
+            signature = self.sign_fn(urllib.parse.urlencode(payload))
+            payload['sign'] = signature
+            payload['csrf_token'] = self.cookies.get('bili_jct', '')
+            payload['csrf'] = self.cookies.get('bili_jct', '')
+            response = self.session.post(self.end_live_url, data=payload)
             response_data = response.json()
             if response_data['code'] == 0:
                 self.is_living = False
@@ -99,10 +128,13 @@ class BiliLive:
                 print(f"停止直播失败: {response_data['message']}")
         except Exception as e:
             print(f"出错了: {e}")
+            print(response.headers)
+            print(response.content)
+            #raise e
 
     def get_area_list(self):
         try:
-            response = self.session.get(self.get_area_url, verify=False)
+            response = self.session.get(self.get_area_url)
             response_data = response.json()
             if response_data['code'] == 0:
                 area_list = response_data['data']
@@ -140,6 +172,12 @@ def main():
         except FileNotFoundError:
             print(f"配置文件 {args.config} 不存在，改为REPL模式")
     bili_live = BiliLive()
+    if "blive_path" in config:
+        blive_path = config["blive_path"]
+        print(f"使用配置文件中的B站直播姬路径: {blive_path}")
+    else:
+        blive_path = input("请输入B站直播姬的安装路径（例如：C:/Programs Files/livehime）：")
+    bili_live.set_blive_path(blive_path)
     if "user_cookies" in config:
         user_cookies = config["user_cookies"]
         print(f"使用配置文件中的cookie: {user_cookies}")
